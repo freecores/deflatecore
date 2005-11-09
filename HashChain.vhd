@@ -1,40 +1,40 @@
 --------------------------------------------------------------------------------
--- Company: 
--- Engineer:
 -- Create Date:    03:46:54 10/31/05
 -- Design Name:    
 -- Module Name:    Hash - Behavioral
 -- Project Name:   Deflate
 -- Revision:
--- Revision 0.01 - File Created
+-- Revision 0.02 - File Created
 -- Additional Comments:
--- 
+-- 3 Hashing algorithms with the same interface.
+-- TO DO: 
+-- Wishbone interface
+-- Concurrent Hashkey generation
 --------------------------------------------------------------------------------
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_ARITH.ALL;
 use IEEE.STD_LOGIC_UNSIGNED.ALL;
-use IEEE.std_logic_unsigned.all;
----- Uncomment the following library declaration if instantiating
----- any Xilinx primitives in this code.
---library UNISIM;
---use UNISIM.VComponents.all;
+use IEEE.std_logic_unsigned.all; 
 
 entity HashChain is
-    Port ( Data_in  : in std_logic_vector (7 downto 0);   -- Data input from byte stream
-           Hash_o   : out real;                          -- Hash value of previous data
-           Clock,													   -- Clock
-			  Reset,													   -- Reset
-			  Output_E : in bit									   -- Output Enable
+    Generic
+	      (																					  -- Data bus width currently set at 8
+			 Data_Width : natural := 8;												  -- Width of the hash key generated now at 32 bits
+			 Hash_Width : natural := 32
+         );
+    Port ( Hash_o   : out std_logic_vector (Hash_Width - 1 downto 0);     -- Hash value of previous data
+           Data_in  : in  std_logic_vector (Data_Width-1 downto 0);       -- Data input from byte stream
+			  Clock,													                    -- Clock
+			  Reset,													                    -- Reset
+			  Output_E : in  bit		                     						  -- Output Enable
            );
 end HashChain;
 
 
 --From Robert Sedgwicks Algorithms in C
 architecture RSHash of HashChain is
-signal mode,
-       data : integer;
-
+signal mode: integer;
 begin
 mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' else  -- Active data being latched to output
         1 when clock = '0' and reset = '0' and Output_E = '1' else  -- No change to output till thge next clock
@@ -42,25 +42,25 @@ mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' else  -- Active da
 		  2 when clock = '1' and reset = '1' and Output_E = '0' else  -- Reset active
 		  3 when clock = '1' and reset = '0' and Output_E = '0' else  -- Disable output
 		  4;
---data <= Data_in; --Need to convert the input standard logic input to a form that can be processed using arthimetic
+
 Process (mode)
-variable a, b, hash : real ; -- Variables for calculating the output
+variable a, b, hash : std_logic_vector (Hash_Width -1 downto 0);   -- Variables for calculating the output
 begin
 case mode is 
-when 0 =>                    --Calculate the hash key of the current input value using the Data on the input vector
+when 0 =>                        --Calculate the hash key of the current input value using the input data
    hash := hash * a;
-   hash := hash + data;
+   hash := hash + Data_in;
 	a    := a * b;
 when 2 =>
-    hash := 0.0;					-- Reset 
-	 a:=378551.0;					-- Reset 
-	 b:=63689.0;					-- Reset
-when 3=>								-- Need to implement a disable output section
+    hash := X"0000_0000";			-- Reset hash value to 0
+	 a:=X"0005_C6B7";					-- Reset a to 378551
+	 b:=X"0000_F8C9";					-- Reset b to 63689
+when 3=>							   	-- Need to implement a disable output section
 
-when OTHERS =>						-- Do nothing 
+when OTHERS =>					   	-- Do nothing 
 
 End case;
-hash_o<= hash;						-- Assign the clculated hash value to the output
+hash_o<= hash;						   -- Latch the calculated hash value to the output
 end process;
 end RSHash;
 
@@ -70,8 +70,7 @@ end RSHash;
 --Actual function hash(i) = hash(i - 1) * 33 + str[i];
 --Function now implemented using XOR hash(i) = hash(i - 1) * 33 ^ str[i];
 architecture DJB of HashChain is
-signal mode,
-       data : integer;
+signal mode: integer;
 
 begin
 mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' else  -- Active data being latched to output
@@ -80,22 +79,22 @@ mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' else  -- Active da
 		  2 when clock = '1' and reset = '1' and Output_E = '0' else  -- Reset active
 		  3 when clock = '1' and reset = '0' and Output_E = '0' else  -- Disable output
 		  4;
---data <= Data_in; --Need to convert the input standard logic input to a form that can be processed using arthimetic
+
 Process (mode)
-variable a, b, hash : real ; -- Variables for calculating the output
+variable a, b, hash :std_logic_vector (Hash_Width - 1 downto 0); -- Variables for calculating the output
 begin
 case mode is 
-when 0 =>                    --Calculate the hash key of the current input value using the Data on the input vector
-	a := hash * 33.0;
-   hash := a + hash + data; 
-when 2 =>
-    hash := 5831.0;				-- Reset 
-when 3=>								-- Need to implement a disable output section
+when 0 =>                                                            --Calculate the hash key of the current input value using the Data on the input vector
+	a := hash * X"21";		                                          --Multiply the hash value by 33 
+   hash := a + hash + Data_in; 													--Add the above value to the previous hash and add the input data
+when 2 =>																				--Reset
+    hash := X"16c7";																	--Reset initial hash value to 5831  
+when 3=>																					-- Need to implement a disable output section
 
-when OTHERS =>						-- Do nothing 
+when OTHERS =>																			-- Do nothing 
 
 End case;
-hash_o<= hash;						-- Assign the clculated hash value to the output
+hash_o<= hash;																			-- Latch the clculated hash value to the output
 end process;
 end DJB;
 
@@ -105,8 +104,7 @@ end DJB;
 --it also happens to be a good general hashing function with good distribution. 
 --the actual function is hash(i) = hash(i - 1) * 65599 + str[i];
 architecture sdbm of HashChain is
-signal mode,
-       data : integer;
+signal mode: integer;
 
 begin
 mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' else  -- Active data being latched to output
@@ -115,21 +113,21 @@ mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' else  -- Active da
 		  2 when clock = '1' and reset = '1' and Output_E = '0' else  -- Reset active
 		  3 when clock = '1' and reset = '0' and Output_E = '0' else  -- Disable output
 		  4;
---data <= Data_in;           --Need to convert the input standard logic input to a form that can be processed using arthimetic
+
 Process (mode)
-variable a, b, hash : real ; -- Variables for calculating the output
+variable a, b, hash : std_logic_vector (Hash_Width - 1 downto 0);   -- Variables for calculating the output
 begin
 case mode is 
-when 0 =>                    --Calculate the hash key of the current input value using the Data on the input vector
-	a := hash * 65599.0;
-   hash := a + hash + data; 
+when 0 =>  														                 --Calculate the hash key of the current input value using the Data on the input vector
+	a := hash * X"1003f";														  --Multiply the previous hash with 65599
+   hash := a + hash + Data_in; 												  --Add the above result to theprevious hash and add the input data 
 when 2 =>
-    hash := 0.0;				      -- Reset 
-when 3=>								-- Need to implement a disable output section
+    hash := X"0";				      											  -- Reset 
+when 3=>																				  -- Need to implement a disable output section
 
-when OTHERS =>						-- Do nothing 
+when OTHERS =>																		  -- Do nothing 
 
 End case;
-hash_o<= hash;						-- Assign the clculated hash value to the output
+hash_o<= hash;																		  -- Assign the clculated hash value to the output
 end process;
 end sdbm;
