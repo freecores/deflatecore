@@ -68,7 +68,6 @@ end RSHash;
 --shown first to the world on the usenet newsgroup comp.lang.c. 
 --It is one of the most efficient hash functions ever published
 --Actual function hash(i) = hash(i - 1) * 33 + str[i];
---Function now implemented using XOR hash(i) = hash(i - 1) * 33 ^ str[i];
 architecture DJB of HashChain is
 signal mode: integer;
 
@@ -98,7 +97,39 @@ hash_o<= hash;																			-- Latch the clculated hash value to the output
 end process;
 end DJB;
 
+--An algorithm produced by Professor Daniel J. Bernstein and 
+--shown first to the world on the usenet newsgroup comp.lang.c. 
+--It is one of the most efficient hash functions ever published
+--Actual function hash(i) = hash(i - 1) * 33 + str[i];
+--Function now implemented using XOR hash(i) = hash(i - 1) * 33 ^ str[i];
+architecture DJB2 of HashChain is
+signal mode: integer;
 
+begin
+mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' else  -- Active data being latched to output
+        1 when clock = '0' and reset = '0' and Output_E = '1' else  -- No change to output till thge next clock
+		  2 when clock = '1' and reset = '1' and Output_E = '1' else  -- Reset active
+		  2 when clock = '1' and reset = '1' and Output_E = '0' else  -- Reset active
+		  3 when clock = '1' and reset = '0' and Output_E = '0' else  -- Disable output
+		  4;
+
+Process (mode)
+variable a, b, hash :std_logic_vector (Hash_Width - 1 downto 0); -- Variables for calculating the output
+begin
+case mode is 
+when 0 =>                                                            --Calculate the hash key of the current input value using the Data on the input vector
+	a := hash * X"21";		                                          --Multiply the hash value by 33 
+   hash := (a + hash) xor Data_in; 													--Add the above value to the previous hash and add the input data
+when 2 =>																				--Reset
+    hash := X"16c7";																	--Reset initial hash value to 5831  
+when 3=>																					-- Need to implement a disable output section
+
+when OTHERS =>																			-- Do nothing 
+
+End case;
+hash_o<= hash;																			-- Latch the clculated hash value to the output
+end process;
+end DJB2;
 --This algorithm was created for sdbm (a public-domain reimplementation of ndbm) database library.
 --it was found to do well in scrambling bits, causing better distribution of the keys and fewer splits.
 --it also happens to be a good general hashing function with good distribution. 
@@ -131,3 +162,27 @@ End case;
 hash_o<= hash;																		  -- Assign the clculated hash value to the output
 end process;
 end sdbm;
+
+--Configuration:
+--Assign the name of the algorithm as the configuration.
+
+Configuration rs_hash of hashchain is 
+for rshash
+end for;
+end rs_hash;
+
+Configuration djb_hash of hashchain is 
+for djb
+end for;
+end djb_hash;
+
+Configuration djb2_hash of hashchain is 
+for djb2
+end for;
+end djb2_hash;
+
+Configuration sdbm_hash of hashchain is 
+for sdbm
+end for;
+end sdbm_hash;
+
