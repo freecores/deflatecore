@@ -53,12 +53,13 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_ARITH.ALL;
 use IEEE.STD_LOGIC_UNSIGNED.ALL;
 use work.mat.all;
+use work.all;
 
-entity stream_search is
+entity stream_hash is
 	Generic 
 	      (Length_of_Table : natural :=	32768;            -- Number of locations in the hash table default = 32k table
 			 Hash_Width      : natural := 32;	 				-- Number of bits in the hash
-			 Data_Width      : natural := 8 					-- Data bus width			 )
+			 Data_Width      : natural := 8 					   -- Data bus width			 )
 			 );
 	Port
 	      (
@@ -66,29 +67,76 @@ entity stream_search is
 			Table_End        : in    std_logic_vector ( log2(Length_of_Table) downto 0);	 -- Ending address of the table
 			Hash_key         : in    std_logic_vector ( (Hash_Width -1) downto 0);			 -- Accept a 32 bit hash input	
 			Hash_inout		  : inout std_logic_vector ( (Data_Width -1) downto 0);			 -- Hash key read/write to be stored
-			Data_in			  : in    std_logic_vector ( (Data_Width -1) downto 0);     	 -- Data input from byte stream
+			Datain			  : in    std_logic_vector ( (Data_Width -1) downto 0);     	 -- Data input from byte stream
 			Clock,						 																       -- Clock input	
 			Output_E			  : in    bit;																	 -- Enable/~Tristate output
-			Table_Match      : in    std_logic_vector ( log2(Length_of_Table) downto 0);   -- Address at which the match was found
+			Table_Match      : out    std_logic_vector ( log2(Length_of_Table) downto 0);   -- Address at which the match was found
 			Match				  , 						  														 -- when 1 hash key generated matches hash from table 
 			Write_Hash		  : out   bit																	 -- no match read the next byte from memory
 			);
-end stream_search;
+end stream_hash;
 --The search is a one to one search of the table
 --The hash keys are stored FIFO unsorted in the table.
 --it is the easiest method and needs to be changed to a sorted store-search.
-architecture one_to_one of stream_search is
-component Hash1
-          Port ( 
+architecture one_to_one of stream_hash is
+component HashChain
+          Generic (																					  -- Data bus width currently set at 8
+			 Data_Width : natural := 8;												  -- Width of the hash key generated now at 32 bits
+			 Hash_Width : natural := 32
+           );
+           Port(
 			  Hash_o   : out std_logic_vector (Hash_Width - 1 downto 0);     -- Hash value of previous data
-           Data_in  : in  std_logic_vector (Data_Width-1 downto 0);       -- Data input from byte stream
+           Data_in  : in  std_logic_vector (Data_Width -1 downto 0);       -- Data input from byte stream
 			  Clock,													                    -- Clock
 			  Reset,													                    -- Reset
 			  Output_E : in  bit		                     						  -- Output Enable
            );
 end component;
+signal hg1,hg2,hg3,hg4 :    std_logic_vector ( (Hash_Width -1) downto 0);			 -- Accept a 32 bit hash input	
+signal hashink : std_logic_vector (Data_Width-1 downto 0);
+signal clk,rst,ope, match1, read, ist : bit;
+signal mode:integer;
 
 begin
+glink:HashChain port map (Hash_o   => hg1,
+           				 Data_in  => Datain,
+			  				 Clock=>clk,													          -- Clock
+			  				 Reset=>rst,													          -- Reset
+			  				 Output_E =>ope		                     						 -- Output Enable
+ 							 );
+--Second hash generator to concurrently search hash values longer than 4
+glink1:HashChain port map (Hash_o   => hg2,
+           				 Data_in  => hg1,
+			  				 Clock=>clk,													          -- Clock
+			  				 Reset=>rst,													          -- Reset
+			  				 Output_E =>ope		                     						 -- Output Enable
+							 );
+
+--End of the hash chain
+--Control  for the hash chain
+--Has to do the following
 
 
+--0. Reset
+mode <= 0 when ist ='0'                  else
+--1. If its the first hash value to be generated, store the first hash value into memory
+        1 when match1 ='0' and read ='0' else
+--2. Read the next hash value and compare it to the values in memory
+		  2 when match1 ='0' and read ='1' else
+--3. If its a match then output the location of the hash value		  
+		  3 when match1 ='1'               else
+		  4;
+--State machine using the above states
+Process (mode, Clock)
+begin
+case mode is 
+when 0 =>
+	  match1 <='0';
+	  read  <='1';
+when 1 => 
+
+when others =>
+
+end case;
+end process;
 end one_to_one;
