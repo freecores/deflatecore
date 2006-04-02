@@ -4,9 +4,10 @@
 -- Module Name:    Hash - Behavioral
 -- Project Name:   Deflate
 -- Revision:
--- Revision 0.02 - File Created
+-- Revision 0.25 - Only one hash algorithm
 -- Additional Comments:
--- 3 Hashing algorithms with the same interface.
+-- The remarked comments for synchronous reser result in the use of more 192 slices witn a maximum frequency of 129 Mhz
+--	But if the code is commented as it is now the number of slices utlised is 5 without a known clock , need to specifiy that as a compile time constraint.
 -- TO DO: 
 -- Wishbone interface
 -- Concurrent Hashkey generation
@@ -27,8 +28,9 @@ entity HashChain is
            Data_in  : in  std_logic_vector (Data_Width-1 downto 0);       -- Data input from byte stream
 			  Clock,													                    -- Clock
 			  Reset,													                    -- Reset
-			  Output_E : in  bit		                     						  -- Output Enable
-           );
+			  Output_E : in  bit	;	                     						  -- Output Enable
+           Hash_Generated : out bit													  -- Enabled when the hash key has been generated
+			  );
 end HashChain;
  
 --An algorithm produced by Professor Daniel J. Bernstein and 
@@ -40,29 +42,36 @@ architecture DJB2 of HashChain is
 signal mode: integer;
 signal tempval:std_logic_vector (Hash_Width - 1 downto 0);
 begin
-mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' else  -- Active data being latched to output
-        1 when clock = '0' and reset = '0' and Output_E = '1' else  -- No change to output till thge next clock
-		  2 when clock = '1' and reset = '1' and Output_E = '1' else  -- Reset active
-		  2 when clock = '1' and reset = '1' and Output_E = '0' else  -- Reset active
-		  3 when clock = '1' and reset = '0' and Output_E = '0' else  -- Disable output
-		  4;
 
-Process (mode)
+mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' and mode = 4 else  -- Active data being latched to output
+        1 when clock = '0' and reset = '0' and Output_E = '1' and mode = 0 else  -- No change to output till thge next clock
+		  2 when clock = '1' and reset = '0' and Output_E = '1' and mode = 1 else  -- Reset active
+		  3 when clock = '0' and reset = '0' and Output_E = '1' and mode = 2 else  -- Reset active
+		  4 when clock = '1' and reset = '0' and Output_E = '1' and mode = 3 else  -- Disable output
+ 		  -- Synchronous reset
+		  -- Remove remark and semi colon from 8 but it results in greater resource utilisation
+		  8 ;-- when clock ='1' and reset ='1';													
+
+Hash_Generated <= '0' when mode <4 or mode = 8 else
+						'1';
+
+Process (clock)
 variable a, b, hash :std_logic_vector (Hash_Width - 1 downto 0); -- Variables for calculating the output
+variable hashg:bit;
 begin
 case mode is 
 when 0 =>                                                            --Calculate the hash key of the current input value using the Data on the input vector
+	b := b + Data_in;																	--Store the input value into a variable
+when 1 =>
 	a := hash * X"21";		                                          --Multiply the hash value by 33 
+when 2 =>
+ 	tempval <= a+hash;
+when 3 =>																					-- 
+	hash := tempval xor b;    													   --Xor the above value to the previous hashkey to generate the new hash key
+when 4 =>
 	b := X"00000000";
-	b := b + Data_in;
-   tempval <= a+hash;
-	hash := tempval xor b;    													--Add the above value to the previous hash and add the input data
-when 2 =>																				--Reset
-    hash := X"16c7";																	--Reset initial hash value to 5831  
-when 3=>																					-- Need to implement a disable output section
-
-when OTHERS =>																			-- Do nothing 
-
+when others=>								 
+   hash := X"16c7";																	--Reset initial hash value to 5831  
 End case;
 hash_o<= hash;																			-- Latch the clculated hash value to the output
 end process;
