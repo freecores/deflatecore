@@ -50,7 +50,7 @@ mode <= 0 when clock = '1' and reset = '0' and Output_E = '1' and mode = 4 else 
 		  4 when clock = '1' and reset = '0' and Output_E = '1' and mode = 3 else  -- Disable output
  		  -- Synchronous reset
 		  -- Remove remark and semi colon from 8 but it results in greater resource utilisation
-		  8 ;-- when clock ='1' and reset ='1';													
+		  8 when clock ='1' and reset ='1';													
 
 Hash_Generated <= '0' when mode <4 or mode = 8 else
 						'1';
