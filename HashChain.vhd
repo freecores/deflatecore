@@ -16,19 +16,18 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_ARITH.ALL;
 use IEEE.STD_LOGIC_UNSIGNED.ALL;
-use IEEE.std_logic_unsigned.all; 
-
+			 
 entity HashChain is
     Generic
 	      (																					  -- Data bus width currently set at 8
 			 Data_Width : natural := 8;												  -- Width of the hash key generated now at 32 bits
 			 Hash_Width : natural := 32
          );
-    Port ( Hash_O   : inout std_logic_vector (Hash_Width - 1 downto 0);     -- Hash value of previous data
+    Port ( Hash_O   : inout std_logic_vector (Hash_Width - 1 downto 0);   -- Hash value of previous data
            Data_in  : in  std_logic_vector (Data_Width-1 downto 0);       -- Data input from byte stream
 			  Clock,													                    -- Clock
 			  Reset,
-			  Star_t,													                    -- Reset
+			  Start,													                    -- Reset
 			  O_E : in  bit	;	                     						     -- Output Enable
            Busy,
 			  Done : out bit													           -- Enabled when the hash key has been generated
@@ -41,33 +40,46 @@ end HashChain;
 --Actual function hash(i) = hash(i - 1) * 33 + str[i];
 --Function now implemented using XOR hash(i) = hash(i - 1) * 33 ^ str[i];
 architecture DJB2 of HashChain is
-signal mode: integer;
-signal tempval, hash :std_logic_vector (Hash_Width - 1 downto 0);
+signal mode: integer := 0;
+signal tempval, hash:std_logic_vector (Hash_Width - 1 downto 0):= X"00000000" ;
+signal multiplier:std_logic_vector (39 downto 0):= X"0000000000" ;
 begin
 
-mode <= 0 when (Reset = '1' or  mode  > 4) and clock = '1' else                                    -- Rezet
-        1 when Star_t = '1' and (mode = 0 or mode < 5) and clock ='1' else        -- Start key generation
-		  2 when mode  =  1  and clock = '0' else                                      -- Just the rest of the statemachine
-		  3 when mode  =  2  and clock = '1' else 
-		  4 when mode  =  3  and clock = '0' and O_E = '1' else
-		  5 ;  
 
-hash <= X"16c7"  when mode = 0 else
-		  --hash sll 5  when mode = 1 else
-		  hash xor tempval when mode =3 else
-		  hash;
+mealymachine: process (Clock)
+begin
+        if Reset = '1' and Clock = '1' then	     -- Reset
+		     mode <= 0;
+        elsif start = '1' and Clock = '1' then	  -- Start
+		     mode <= 1;									  -- Multiply previous key by 33	  ( Clock = 1 )
+		  elsif mode = 1 then							  
+		     mode <= 2;									  -- Ex-OR input with existing key ( Clock = 0 )
+		  elsif mode = 2 then							  
+		     mode <= 3;									  -- Latch output                  ( Clock = 1 )
+		  else
+		     mode <= 4;
+        end if;
+end process mealymachine;
 
-tempval <= X"0000" when mode /= 2 else
+hash <= X"000016c7"  when mode = 0 else			   --initialise the hash key to 5831
+		  multiplier(31 downto 0) xor tempval   when mode = 2 else	   --Ex or with the current input
+		  hash;												   --keep current value
+
+multiplier <= hash * X"21" when mode = 1 else		      --Multiply by 33
+				  X"0000000000";
+
+tempval <= X"00000000" when mode /= 1 else		   --Temporary value to be able to Exor the input with the hash key
            tempval+ Data_in;
 
-busy <= '1' when mode > 0 and mode <3 else
-        '0';
+busy <= '1' when mode > 0 and mode < 3 else		   --Indicates that the key is being generated
+        '0' ;
 
-Hash_O <= hash when mode =3 else
-          Hash_O when (mode = 4 or mode = 5) and O_E = '1' else
-			 X"0000";
 
-done <= '1' when mode = 3 else
+Hash_O <= hash when mode = 3 and O_E = '1' else   --Output buffer
+          Hash_O;                                 --Hash op bufffer
+			 									
+
+done <= '1' when mode = 3 else                    --1 after hash key has been calculated 
         '0';
 
 
