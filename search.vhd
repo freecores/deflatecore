@@ -1,18 +1,18 @@
 --------------------------------------------------------------------------------
--- Create Date:    15:24:38 11/10/05
+-- Create Date:    Open source, from 12c core hosted at  www.opencores.org
 -- Design Name:    
--- Module Name:    search - Behavioral
+-- Module Name:    Log function base 2
 -- Project Name:   Deflate
 -- Target Device:  
--- Dependencies: Hashchain.vhdl
+-- Dependencies: 
 -- 
--- Revision:
--- Revision 0.01 - File Created
+-- Revision: NA
 -- Additional Comments:
--- A wrapper for the DJB2 algorithm has a 3 byte buffer to generate 4 byte hash keys
--- 
+-- Use this to convert the memeory lengths to the 2^x values
+-- to dynamically assign the widths of the address
 -- 
 --------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.std_logic_1164.all;
 use IEEE.numeric_std.all;
@@ -47,15 +47,85 @@ end package body mat;
 --End of the package
 
 
+
+
+--------------------------------------------------------------------------------
+-- Create Date:    17:24:38 20/05/2006
+-- Design Name:    
+-- Module Name:    
+-- Project Name:   Deflate
+-- Target Device:  
+-- Dependencies: hahskey.vhdl
+-- 
+-- Revision:
+-- Revision 0.50 - Works but not optimised
+-- Additional Comments:
+-- This componenet controls the data input and stores the data alongwith 
+-- the source in 32k buffers ,
+-- It recieves the data directly and then on finding a minimum match 
+-- Drives its match output high along with the match address on the address output
+-- and the current offset on the next clock cycle
+-- waits for the next +ve edge on the Active data input 
+-- to go high before resuming, the output/ input is +ve edge triggered
+-- 
+--------------------------------------------------------------------------------
+
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.STD_LOGIC_ARITH.ALL;
 use IEEE.STD_LOGIC_UNSIGNED.ALL;
 use work.mat.all;
-use work.all;
 
-entity hash_table is
---generic definitions, data bus widths.
+entity input_process is
+	Generic 
+	      (
+			 -- Number of bits in the key
+			 Hash_Width      : natural := 32;	 
+			 -- Data bus width
+			 Data_Width      : natural := 8;
+			 -- Buffer allocated to the hash table and the source buffer = 32k tables
+			 -- The key buffer has to be equal to the Hash_Width above and 
+			 -- the source buffer of  Dat width 
+ 			 -- Start address for the memory bank at which the hash keys need to be stored
+			 -- The end address is calculated by adding the length of the table to that address  
+			 Length_of_Table : natural :=	32768            
+			 );
+	Port
+	      (
+			 --Outputs to read/write the key values.
+			 hash_tbl_dat    : inout std_logic_vector ( Hash_Width - 1 downto 0);          
+			 --Port to read/write data values
+			 source_buff_dat : inout std_logic_vector ( Data_Width - 1 downto 0);          
+			 -- Matching 4 bytes fond for the last 4 inputs
+			 Match,
+			 -- Ready for crunching
+			 Ready,
+			 -- The sync signals to the memory, read write operations 
+			 -- done simultaneously on both memry banks
+			 -- The design will currently work with SRAM and will need a wrapper to  
+			 -- work with DRAM
+			 -- Active data on output
+			 Act_data_out,
+			 --Read or write operation 0 = read, 1 = write
+			 RW              : out bit	;
+			 -- Current address in buffers
+          Curr_addres     : out std_logic_vector (log2 ( Length_of_Table ) - 1 downto 0); 
+			 --******
+			 --Input signals
+			 --Data in
+			 source_dat : inout std_logic_vector ( Data_Width - 1 downto 0);          
+			 -- Input Data Clock
+			 Act_dat,
+			 -- Clock
+			 Src_clk,
+			 -- Reset
+			 Reset : in bit
+			 
+			 );
+end input_process;
+
+architecture mealy_machine of input_process is
+component hash_key is
 generic
        (
 		 hash_width: natural := 32;
@@ -69,127 +139,107 @@ port
 		 start : in bit;
 		 ready,
 		 busy: out bit);
-end hash_table;
-
-architecture genhash of hash_table is
-component HashChain
-          Generic (																					  
-			 Data_Width : natural := 8;	  -- Data Bus width
-			 Hash_Width : natural := 32	  -- Width of the hash key generated 
-			         );
-           Port(
-			  Hash_o   : out std_logic_vector (Hash_Width - 1 downto 0);      -- Hash key
-           Data_in  : in  std_logic_vector (Data_Width -1 downto 0);       -- Data input from byte stream
-			  Busy,																				-- Busy
-			  Done: out bit;																	-- Key generated
-			  Clock,													                     -- Clock
-			  Reset,													                     -- Reset
-			  Start,																				-- Start the hash key generation
-			  O_E : in  bit		                     						      -- Output Enable
-           );
 end component;
-
-signal hg1:    std_logic_vector ( (Hash_Width -1) downto 0);			 -- Accept a 32 bit hash input	
-signal Datain, Buffer_1, Buffer_2, Buffer_3 : std_logic_vector (Data_Width-1 downto 0);  -- 8 bit io buffers
-signal Algo_start, Algo_clk,Algo_rst,Algo_op, Algo_bsy, Key_done: bit;						  -- Algorithm interface aignals
-signal mode, buff_count, proc_count :integer;
+       -- Buffer address start for the key table
+Signal key_address,
+       buffer_address:   std_logic_vector (log2 ( Length_of_Table ) - 1 downto 0); 
+		 -- Accept a 32 bit hash input	
+signal hg1:    std_logic_vector ( (Hash_Width -1) downto 0);
+-- 8 bit io buffer	
+signal Buffer_1 : std_logic_vector (Data_Width-1 downto 0);  
+--Component signals from the key algorithm
+signal Algo_start, 
+       Algo_clk,
+		 Algo_rst,
+		 Algo_op, 
+		 Algo_bsy, 	 -- Algorithm sync aignals
+		 Search_done,
+		 Busy,
+		 red_rst,
+		 red_opr, 
+		 val_match: bit := '0';	--Internal sync sgnals					  
+signal mode,
+       store_count :integer;
 
 begin
-glink:HashChain port map (Hash_O  => hg1, 
-                          Data_in => Datain,
-			                 Clock   => Algo_clk,	
-			                 Reset	 => Algo_rst,
-			                 Start	 => Algo_start,											                
-			                 O_E     => Algo_op,            						   
-                          Busy	 => Algo_bsy,
-			                 Done	 => Key_done);
--- 3 byte input buffer
--- Stores the last 3 bytes used to generate a hash key to keep the hash keys current
--- The hash algorightm is reset after every 4 byte key is generated 
---	to ensure that the matches are of 4 byte lengths
-Buffer_1 <= X"00"    when mode = 0 else
-				Buffer_2 when mode = 2 else
-				Buffer_1;
 
-Buffer_2 <= X"00"    when mode = 0 else
-				Buffer_3 when mode = 2 else
-				Buffer_2;
+--Unlike the sub components this module has a slightly complex reset cycle
+--It resets the offset counters to 0, uses the next 7 clock cyces to read the 
+--start addresses for the data and key buffer
 
-Buffer_3 <= X"00"    when mode = 0 else
-				Data_in  when mode = 2 else
-				Buffer_3;
-
---Common Clock
-Algo_clk <= Clock;
-
---	Reset the hash algorithm when reset
-Algo_rst <= '1' when mode = 0 or mode = 1else
-            '0';
-
---Sync signals
-busy <= '1' when mode > 1 else
-        '0';
-
---Send a start for every input byte.
-Algo_start <= '1' when mode = 2 and buff_count = 3 else -- the 3 byte buffer is empty
-              '1' when mode = 4 else						  -- 3 byte buffer is full and one byte has been processed
-              '0';
-
--- 4 bytes sent one after the other	to the hashing algorithm
-Datain <= X"00" when mode = 0 or mode = 1 else
-          Buffer_1 when mode = 2 and buff_count = 3  else
-			 Buffer_1 when mode = 4 and buff_count = 3 and proc_count = 1 else
-			 Buffer_2 when mode = 4 and buff_count = 3 and proc_count = 2 else
-			 Buffer_3 when mode = 4 and buff_count = 3 and proc_count = 3 else
-			 X"00";
-
--- Enabling hash algo output
-Algo_op <= '1' when proc_count > 2 else
-           '0';
-
---Buffer counter 
-buffer_counter: process (mode)
-begin
-   if mode = 0 then
-       buff_count <= 0;      -- Reset
-	elsif	mode = 2 and buff_count < 3 then
-	    buff_count <= buff_count + 1;  -- 1 byte added to buffer
-   else
-	    buff_count <= buff_count;      -- BUffer is full keep the buffered values and the count
-	end if;
-end process buffer_counter;
-
--- Procesed bytes counter
-processed_counter: process (mode)
-begin
-   if (mode = 2 and buff_count = 3) or mode = 4 then
-	   proc_count <= proc_count + 1 ; 
-	elsif mode = 3 then 
-		proc_count <= proc_count;
-   else 
-	   proc_count <= 0;
-   end if;
-end process processed_counter;
-
-
--- mealy machine, sends 4 bytes sequentially to the hashing algorithm
---	Waits for the buffer to get filled, on the first +ve clock edge afer the start input
--- is made 1 it sends the bytes to the DJB algorithm.
-
-mealy_mach: process (Clock, Reset, Start)
+resetter: process (Src_Clk)
+variable tmp: integer;
+variable red: bit :='0';
 Begin
- if Clock'event and Clock = '1' then -- +ve clock
-	if Reset = '1' then  -- Reset
-	   mode <= 0;
-   elsif Start = '1' and mode < 2 then --Start either fill the buffer or Process the first byte in buffer
-	   mode <= 2;
-   elsif (mode = 2 and buff_count = 3) or (mode > 1 and Algo_bsy = '1')  then  -- Buffer is fll processing first byte
-	   mode <= 3;		 -- wait while algorithm finishes generating hash
-   elsif mode = 3 and proc_count < 4 then
-	   mode <= 4;       --  To hash the next 3 bytes 
-	else
-	   mode <= 1;       --  Wait
+ if Src_Clk'event and Src_Clk = '1' then
+  if mode /= 0 then 
+    red_rst <= '0'; 
+	 tmp := 0;
+  else
+    case tmp  is
+	    when 0 =>
+				buffer_address (7 downto 0) <= source_dat;
+       when 1 =>
+		      buffer_address (14 downto 8) <= source_dat (6 downto 0);
+       when 2 =>
+				key_address    (7 downto 0) <= source_dat;
+		 when 3 =>
+		      key_address    (14 downto 8) <= source_dat (6 downto 0);
+       when 4 =>
+		      red_rst <= '1';
+       when others =>
+				red_rst <= '0';
+     end case;
+	  end if;
+ end if;
+end process resetter; 
+
+--The main input mealy machine is defined below
+-- It has 6 states of operation
+-- Mode 0 : Reset
+-- Mode 1 : Wait
+-- Mode 2 :	Active data input generationg a key for it and the last 3 bytes
+-- Mode 3 : Storing the key and the input data
+-- Mode 4 : Searching the hash buffer for a 4 byte match
+-- Mode 5 : Match found, on the next clock cycle output current buffer offet
+--          and on the second clock cycle output the match offset    
+  
+input_control : process (Act_dat, Src_Clk, Reset )
+begin
+--+ Ve edge triggered
+ if Src_Clk'event and Src_Clk = '1' then 
+   -- Mealy machine
+	If Reset = '1' or ( mode = 0 and red_rst ='0' ) then
+     mode <= 0;
+   elsif	mode < 2 and Act_dat = '1' then
+	  mode <= 2;
+ 	elsif	mode = 2 and Algo_bsy = '0' and store_count < 3 then
+	  mode <= 3;
+ 	elsif	mode = 2 and Algo_bsy = '0' then
+	  mode <= 4;
+ 	elsif	mode = 4 and Search_done = '1' and val_match = '1' then
+	  mode <= 5;
+ 	elsif	mode = 4 and Search_done = '1' then
+	  mode <= 3;
+ 	elsif	( mode = 5 or mode = 3 ) and Busy = '0' then
+	  mode <= 1;
+ 	else
+	  mode <= mode;
    end if;
  end if;
-end process mealy_mach;
-end genhash;
+end process input_control;
+--************************************************
+-- Algorithm component addition
+Key_Gen: hash_key port map 
+                 (
+					  data_in => Buffer_1,
+		           hash_out => hg1,
+		           Clock => Algo_clk,
+		           reset => Algo_rst,
+		           start => Algo_start,
+		           ready => Algo_op,
+		           busy  => Algo_bsy
+					  );
+-- ************************************************
+Ready <= red_rst or red_opr;
+end mealy_machine;
