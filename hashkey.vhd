@@ -34,7 +34,7 @@ port
 		 Clock,
 		 reset,
 		 start : in bit;
-		 ready,
+		 ready, -- Not used
 		 busy: out bit);
 end hash_key;
 
@@ -145,17 +145,23 @@ end process processed_counter;
 
 mealy_mach: process (Clock, Reset, Start)
 Begin
- if Clock'event and Clock = '1' then -- +ve clock
+ -- +ve clock
+ if Clock'event and Clock = '1' then 
 	if Reset = '1' then  -- Reset
 	   mode <= 0;
-   elsif Start = '1' and mode < 2 then --Start either fill the buffer or Process the first byte in buffer
+   --Start either fill the buffer or Process the first byte in buffer
+	elsif Start = '1' and mode < 2 then 
 	   mode <= 2;
-   elsif (mode = 2 and buff_count = 3) or (mode > 1 and Algo_bsy = '1')  then  -- Buffer is fll processing first byte
-	   mode <= 3;		 -- wait while algorithm finishes generating hash
-   elsif mode = 3 and proc_count < 4 then
-	   mode <= 4;       --  To hash the next 3 bytes 
+   -- Buffer is still processing first byte
+	-- wait while algorithm finishes generating hash
+	elsif (mode = 2 and buff_count = 3) or (mode > 1 and Algo_bsy = '1')  then  
+	   mode <= 3;		 
+   --  To hash the next 3 bytes
+	elsif mode = 3 and proc_count < 4 then
+	   mode <= 4;        
+	--  Wait
 	else
-	   mode <= 1;       --  Wait
+	   mode <= 1;       
    end if;
  end if;
 end process mealy_mach;
